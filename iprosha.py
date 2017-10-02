@@ -6,7 +6,7 @@ import re
 import pprint
 
 import requests
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +17,7 @@ logger = logging.getLogger()
 def make_cmd_arguments_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--session', '-s', type=int, help='session-id auth method don\'t need sms. Paste session number value')
-    return parser.parse_args()
+    return parser
 
 
 def get_ipro_auth_session(login, password, session_id=None):
@@ -40,12 +40,21 @@ def get_ipro_auth_session(login, password, session_id=None):
             'log': login,
             'pwd': password
         }
-        session_id = session.get(login_with_sms_url, params=request_params).json().get('session')
+        session_params_json = session.get(login_with_sms_url, params=request_params).json()
+        session_id = session_params_json.get('session')
+        man_id = session_params_json.get('man_id')
+        login_type = session_params_json.get('login_type')
         sms_code = input('Please type sms code here: ')
         request_params['smsCode'], request_params['session'] = sms_code, session_id
         session.get(login_with_sms_url, params=request_params)
-        logger.info('You authorise! You session-id: {}'.format(session_id))
+        logger.info('You authorise! You man-id: {}'.format(man_id))
+        logger.info(' You session-id: {}'.format(session_id))
+        logger.info(' You login-type: {}'.format(login_type))
     return session
+
+
+def clean_html_tags(cleaned_text):
+    return BeautifulSoup(cleaned_text, "html.parser").text
 
 
 def fetch_full_client_list(session):
@@ -57,15 +66,32 @@ def fetch_full_client_list(session):
     for client_info in client_info_json:
         client_id = client_info['ID']
         name, specialization, worth, warm = re.match(r'(.+) \((\S+),~(\S+), +(.+)\)', client_info['Name']).groups()
-        result.append(ClientInfo(client_id, name, specialization, worth, warm))
+        result.append(ClientInfo(
+            id=client_id,
+            name=clean_html_tags(name),
+            specialization=specialization,
+            worth=worth,
+            warm=warm
+        ))
     return result
 
 
-def fill_shedule(session, schedule_file): # $("#dialog_delete").dialog("open");
+def save_list_of_named_tuples_to_xlsx(list_of_named_tuples, output_filepath):
+    if not list_of_named_tuples:
+        raise ValueError('You need put some data to write')
+    workbook = Workbook(write_only=True)
+    worksheet = workbook.create_sheet()
+    worksheet.append(list_of_named_tuples[0]._fields)
+    for named_tuple in list_of_named_tuples:
+        worksheet.append(named_tuple)
+    workbook.save(output_filepath)
+
+
+def fill_schedule(session, schedule_file): # $("#dialog_delete").dialog("open");
     workbook = load_workbook(filename=schedule_file)
     worksheet = workbook.worksheets[0]
     schedule_file_data = []
-    for row_index in range(2,worksheet.max_row):
+    for row_index in range(2, worksheet.max_row):
         data = []
         for cell in worksheet[row_index]:
             data.append(cell.value)
@@ -73,13 +99,15 @@ def fill_shedule(session, schedule_file): # $("#dialog_delete").dialog("open");
     return schedule_file_data
 
 
-
 if __name__ == '__main__':
-    login, password = '07elv', 'd561tj3'
-    cmd_args = make_cmd_arguments_parser()
+    login, password = '07elv', 'd561tj4'
+    cmd_args_parser = make_cmd_arguments_parser()
+    cmd_args = cmd_args_parser.parse_args()
     session_id = cmd_args.session
-    ipro_session = get_ipro_auth_session(login, password, session_id=session_id) if session_id \
-        else get_ipro_auth_session(login, password)
+
+    ipro_session = get_ipro_auth_session(login, password, session_id=session_id)
 
     # pprint.pprint(fetch_full_client_list(ipro_session))
-    pprint.pprint(fill_shedule(ipro_session, 'task2.xlsx'))
+    # save_list_of_named_tuples_to_xlsx(list_of_named_tuples=fetch_full_client_list(ipro_session),
+    #                                   output_filepath='named_tuple.xlsx')
+    # pprint.pprint(fill_schedule(ipro_session, 'task2.xlsx'))
