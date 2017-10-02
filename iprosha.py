@@ -87,6 +87,28 @@ def save_list_of_named_tuples_to_xlsx(list_of_named_tuples, output_filepath):
     workbook.save(output_filepath)
 
 
+def fill_schedule_task(session, client_code, task_date, task_message):
+    client_schedule_post_url = 'http://ipro.etm.ru/cat/runprog.html'
+    schedule_request_params = {
+        'man': '9019820',
+        'login': '07elv',
+        'syf_prog': 'pr_meeting-rsp',
+        'withoutArchive': 'yes',
+        'RSPAction': 'A',
+        'pme_persons': 'pmp_class37^ССПб3$man-code^9019820$cli-code^{}$exm_mancode^'.format(client_code),
+        'pme_datep': task_date,
+        'RO_theme': 'Развитие продаж',
+        'pme_theme': 'ВТ10',
+        'RO_subtheme': 'Встречи с партнёрами',
+        'pme_subtheme': 'ВТ1010',
+        'RO_type': 'Встреча с партнёром',
+        'pme_type': 'ВМ10',
+        'pme_task': task_message,
+        'pme_state': 'appoint'
+    }
+    session.get(client_schedule_post_url, params=schedule_request_params)
+
+
 def fill_schedule(session, schedule_file): # $("#dialog_delete").dialog("open");
     workbook = load_workbook(filename=schedule_file)
     worksheet = workbook.worksheets[0]
@@ -96,7 +118,11 @@ def fill_schedule(session, schedule_file): # $("#dialog_delete").dialog("open");
         for cell in worksheet[row_index]:
             data.append(cell.value)
         schedule_file_data.append(data)
-    return schedule_file_data
+    for task in schedule_file_data:
+        client_code = task[0]
+        task_date = task[2]
+        task_message = task[3]
+        fill_schedule_task(session, client_code, task_date, task_message)
 
 
 if __name__ == '__main__':
@@ -107,7 +133,7 @@ if __name__ == '__main__':
 
     ipro_session = get_ipro_auth_session(login, password, session_id=session_id)
 
-    # pprint.pprint(fetch_full_client_list(ipro_session))
+    pprint.pprint(fetch_full_client_list(ipro_session))
     # save_list_of_named_tuples_to_xlsx(list_of_named_tuples=fetch_full_client_list(ipro_session),
     #                                   output_filepath='named_tuple.xlsx')
     # pprint.pprint(fill_schedule(ipro_session, 'task2.xlsx'))
