@@ -4,6 +4,7 @@ import json
 from collections import namedtuple
 import re
 import pprint
+import pickle
 
 import requests
 from openpyxl import Workbook, load_workbook
@@ -22,6 +23,7 @@ def make_cmd_arguments_parser():
 
 def get_ipro_auth_session(login, password, session_id=None):
     session = requests.Session()
+    UserInfo = namedtuple('AuthInfo', ['login', 'password', 'man_id', 'login_type', 'session_id'])
     man_id, login_type = '9019820', 'WI'
     login_with_sms_url = 'https://spb.etm.ru/ns2000/data-login.php'
     login_without_sms_url = 'http://spb.etm.ru/ipro2'
@@ -47,33 +49,46 @@ def get_ipro_auth_session(login, password, session_id=None):
         sms_code = input('Please type sms code here: ')
         request_params['smsCode'], request_params['session'] = sms_code, session_id
         session.get(login_with_sms_url, params=request_params)
-        logger.info('You authorise! You man-id: {}'.format(man_id))
-        logger.info(' You session-id: {}'.format(session_id))
-        logger.info(' You login-type: {}'.format(login_type))
-    return session
+
+    logger.info('You authorise! You man-id: {}'.format(man_id))
+    logger.info(' You session-id: {}'.format(session_id))
+    logger.info(' You login-type: {}'.format(login_type))
+    session_info = UserInfo(login=login,
+                            man_id=man_id,
+                            password=password,
+                            login_type=login_type,
+                            session_id=session_id)
+    return session, session_info
 
 
 def clean_html_tags(cleaned_text):
     return BeautifulSoup(cleaned_text, "html.parser").text
 
 
-def fetch_full_client_list(session):
-    client_info_page_url = 'http://spb.etm.ru/cat/data-orgtree.html?login=07elv&man=9019820&id=1461216007&d1=01/09/17&d2=01/10/17'
-    client_info_page_html = session.get(client_info_page_url).text
-    client_info_json = json.loads(client_info_page_html)['Nodes']
+def fetch_full_client_list(session, session_info, url_id_parameter):
+    client_info_page_url = 'http://spb.etm.ru/cat/data-orgtree.html'
+    client_info_page_params = {
+        'login': session_info.login,
+        'man': session_info.man_id,
+        'id': url_id_parameter,
+        'd1': '01/09/17',
+        'd2': '01/10/17',
+    }
+    client_info_page = session.get(client_info_page_url, params=client_info_page_params)
+    client_info_json = json.loads(client_info_page.text)['Nodes']
     ClientInfo = namedtuple('ClientInfo', ['id', 'name', 'specialization', 'worth', 'warm'])
-    result = []
+    client_info_list = []
     for client_info in client_info_json:
         client_id = client_info['ID']
         name, specialization, worth, warm = re.match(r'(.+) \((\S+),~(\S+), +(.+)\)', client_info['Name']).groups()
-        result.append(ClientInfo(
+        client_info_list.append(ClientInfo(
             id=client_id,
             name=clean_html_tags(name),
             specialization=specialization,
             worth=worth,
             warm=warm
         ))
-    return result
+    return client_info_list
 
 
 def save_list_of_named_tuples_to_xlsx(list_of_named_tuples, output_filepath):
@@ -87,42 +102,63 @@ def save_list_of_named_tuples_to_xlsx(list_of_named_tuples, output_filepath):
     workbook.save(output_filepath)
 
 
-def fill_schedule_task(session, client_code, task_date, task_message):
+def fill_schedule_task(session, session_info, client_code, task_date, task_message, task_result=None):
     client_schedule_post_url = 'http://ipro.etm.ru/cat/runprog.html'
     schedule_request_params = {
-        'man': '9019820',
-        'login': '07elv',
+        'man': session_info.man_id,
+        'login': session_info.login,
+        'pme_persons': 'pmp_class37^ССПб3$man-code^{man_id}$cli-code^{client_code}$exm_mancode^'.format(man_id=session_info.man_id,
+                                                                                                        client_code=client_code),
+        'pme_datep': task_date,
+        'pme_task': task_message,
+        'pme_result': task_result,
+        # Unknown params
         'syf_prog': 'pr_meeting-rsp',
         'withoutArchive': 'yes',
         'RSPAction': 'A',
-        'pme_persons': 'pmp_class37^ССПб3$man-code^9019820$cli-code^{}$exm_mancode^'.format(client_code),
-        'pme_datep': task_date,
+        'pme_state': 'appoint',
         'RO_theme': 'Развитие продаж',
         'pme_theme': 'ВТ10',
         'RO_subtheme': 'Встречи с партнёрами',
         'pme_subtheme': 'ВТ1010',
         'RO_type': 'Встреча с партнёром',
         'pme_type': 'ВМ10',
-        'pme_task': task_message,
-        'pme_state': 'appoint'
     }
     session.get(client_schedule_post_url, params=schedule_request_params)
 
 
-def fill_schedule(session, schedule_file): # $("#dialog_delete").dialog("open");
+def fill_schedule(session, session_info, schedule_file): # $("#dialog_delete").dialog("open");
     workbook = load_workbook(filename=schedule_file)
     worksheet = workbook.worksheets[0]
     schedule_file_data = []
-    for row_index in range(2, worksheet.max_row):
-        data = []
-        for cell in worksheet[row_index]:
-            data.append(cell.value)
-        schedule_file_data.append(data)
-    for task in schedule_file_data:
+    for row in worksheet.rows:
+        schedule_file_data.append([cell.value for cell in row])
+
+    for task in schedule_file_data[1:]:
         client_code = task[0]
-        task_date = task[2]
-        task_message = task[3]
-        fill_schedule_task(session, client_code, task_date, task_message)
+        task_date = task[5]
+        task_message = task[6]
+        fill_schedule_task(session=session,
+                           session_info=session_info,
+                           client_code=client_code,
+                           task_date=task_date,
+                           task_message=task_message,
+                           task_result=None)
+
+
+# def save_auth_info_to_pickle():
+#     with open('auth.pk', 'rb') as file_handler:
+#         auth_info_data = pickle.load(file_handler)
+#     login = 'test1'
+#     current_auth_info = {
+#         'password': 11,
+#         'man_id': 44,
+#         'login_type': 11,
+#         'session_id': 11
+#     }
+#     auth_info_data[login] = current_auth_info
+#     with open('auth.pk', 'wb') as file_handler:
+#         pickle.dump(auth_info_data, file_handler)
 
 
 if __name__ == '__main__':
@@ -131,9 +167,17 @@ if __name__ == '__main__':
     cmd_args = cmd_args_parser.parse_args()
     session_id = cmd_args.session
 
-    ipro_session = get_ipro_auth_session(login, password, session_id=session_id)
+    ipro_session, ipro_auth_info = get_ipro_auth_session(login=login,
+                                                         password=password,
+                                                         session_id=session_id,)
 
-    pprint.pprint(fetch_full_client_list(ipro_session))
-    # save_list_of_named_tuples_to_xlsx(list_of_named_tuples=fetch_full_client_list(ipro_session),
-    #                                   output_filepath='named_tuple.xlsx')
-    # pprint.pprint(fill_schedule(ipro_session, 'task2.xlsx'))
+    # pprint.pprint(ipro_auth_info)
+
+    # full_client_list = fetch_full_client_list(session=ipro_session,
+    #                                           session_info=ipro_auth_info,
+    #                                           url_id_parameter=1461216007)
+    # save_list_of_named_tuples_to_xlsx(list_of_named_tuples=full_client_list,
+    #                                   output_filepath='full_client_list_{}.xlsx'.format(login))
+    # fill_schedule(session=ipro_session,
+    #               session_info=ipro_auth_info,
+    #               schedule_file='full_client_list_07elv.xlsx',)
