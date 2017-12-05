@@ -71,8 +71,8 @@ def fetch_full_client_list(session, session_info, url_id_parameter):
         'login': session_info.login,
         'man': session_info.man_id,
         'id': url_id_parameter,
-        'd1': '01/09/17',
-        'd2': '01/10/17',
+        'd1': '01/10/17',
+        'd2': '01/11/17',
     }
     client_info_page = session.get(client_info_page_url, params=client_info_page_params)
     client_info_json = json.loads(client_info_page.text)['Nodes']
@@ -100,6 +100,22 @@ def save_list_of_named_tuples_to_xlsx(list_of_named_tuples, output_filepath):
     for named_tuple in list_of_named_tuples:
         worksheet.append(named_tuple)
     workbook.save(output_filepath)
+
+
+def setup_plan_to_company(session, session_info, company_id, to_for_month, rtn_for_month):
+    setup_plan_url = 'http://spb.etm.ru/cat/data-plan.html'
+    setup_plan_params = {
+        'id' : company_id,
+        'login': session_info.login,
+        'man' : session_info.man_id,
+        'usr': session_info.man_id,
+        'month': '11',
+        'year': '2017',
+        'to': to_for_month,
+        'rtn': rtn_for_month,
+        'cause': 'завершение объекта',
+    }
+    session.post(setup_plan_url, params=setup_plan_params)
 
 
 def fill_schedule_task(session, session_info, client_code, task_date, task_message, task_result=None):
@@ -162,7 +178,8 @@ def fill_schedule(session, session_info, schedule_file): # $("#dialog_delete").d
 
 
 if __name__ == '__main__':
-    login, password = '07elv', 'd561tj4'
+    login, password = '07see', 'cscofnabkltb2908'
+    # login, password = '07elv', 'd561tj4'
     cmd_args_parser = make_cmd_arguments_parser()
     cmd_args = cmd_args_parser.parse_args()
     session_id = cmd_args.session
@@ -173,11 +190,19 @@ if __name__ == '__main__':
 
     # pprint.pprint(ipro_auth_info)
 
-    # full_client_list = fetch_full_client_list(session=ipro_session,
-    #                                           session_info=ipro_auth_info,
-    #                                           url_id_parameter=1461216007)
-    # save_list_of_named_tuples_to_xlsx(list_of_named_tuples=full_client_list,
-    #                                   output_filepath='full_client_list_{}.xlsx'.format(login))
-    # fill_schedule(session=ipro_session,
-    #               session_info=ipro_auth_info,
-    #               schedule_file='full_client_list_07elv.xlsx',)
+    #full_client_list = fetch_full_client_list(session=ipro_session,
+    #                                          session_info=ipro_auth_info,
+    #                                          url_id_parameter=1461219847 #07see
+                                              #url_id_parameter=1461216007 #07elv
+    #                                          )
+    #save_list_of_named_tuples_to_xlsx(list_of_named_tuples=full_client_list,
+    #                                  output_filepath='full_client_list_{}.xlsx'.format(login))
+    fill_schedule(session=ipro_session,
+                  session_info=ipro_auth_info,
+                  schedule_file='full_client_list_07see_november.xlsx',)
+    #setup_plan_to_company(session=ipro_session,
+    #                      session_info=ipro_auth_info,
+    #                      company_id='60115193',
+    #                      to_for_month='0',
+    #                      rtn_for_month='0.00')
+
