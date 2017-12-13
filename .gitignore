@@ -1,8 +1,8 @@
 # Created by .ignore support plugin (hsz.mobi)
 venv/
+.vscode/
 __pycache__/
 .idea/
 *.json
 *.xlsx
-pip-selfcheck.json
-pyvenv.cfg
+
